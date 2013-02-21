@@ -50,6 +50,7 @@ class TimeSeries(list):
 
 
   def __consolidatingGenerator(self, gen):
+    print "in render.datalib.TimeSeries.__consolidatingGenerator"
     buf = []
     for x in gen:
       buf.append(x)
@@ -67,16 +68,18 @@ class TimeSeries(list):
 
 
   def __consolidate(self, values):
+    #print "in render.datalib.TimeSeries.__consolidate"
     usable = [v for v in values if v is not None]
-    if not usable: return None
+    if not usable: 
+      print "Error, v was unusable"
+      print v
+      return None
     if self.consolidationFunc == 'sum':
+      #print "render.datalib.TimeSeries.__consolidate Returning sum"
       return sum(usable)
     if self.consolidationFunc == 'average':
+      #print "render.datalib.TimeSeries.__consolidate Returning float"
       return float(sum(usable)) / len(usable)
-    if self.consolidationFunc == 'max':
-      return max(usable)
-    if self.consolidationFunc == 'min':
-      return min(usable)
     raise Exception, "Invalid consolidation function!"
 
 
@@ -86,6 +89,7 @@ class TimeSeries(list):
 
   def getInfo(self):
     """Pickle-friendly representation of the series"""
+    print "in render.datalib.TimeSeries.getInfo"
     return {
       'name' : self.name,
       'start' : self.start,
@@ -110,9 +114,11 @@ class CarbonLinkPool:
 
   def select_host(self, metric):
     "Returns the carbon host that has data for the given metric"
+    print "in render.datalib.CarbonLinkPool.select_host"
     return self.hash_ring.get_node(metric)
 
   def get_connection(self, host):
+    print "in render.datalib.CarbonLinkPool.get_connection"
     # First try to take one out of the pool for this host
     (server, instance) = host
     port = self.ports[host]
@@ -135,12 +141,14 @@ class CarbonLinkPool:
       return connection
 
   def query(self, metric):
+    print "in render.datalib.CarbonLinkPool.query"
     request = dict(type='cache-query', metric=metric)
     results = self.send_request(request)
     log.cache("CarbonLink cache-query request for %s returned %d datapoints" % (metric, len(results)))
     return results['datapoints']
 
   def get_metadata(self, metric, key):
+    print "in render.datalib.CarbonLinkPool.get_metadata"
     request = dict(type='get-metadata', metric=metric, key=key)
     results = self.send_request(request)
     log.cache("CarbonLink get-metadata request received for %s:%s" % (metric, key))
@@ -153,6 +161,7 @@ class CarbonLinkPool:
     return results
 
   def send_request(self, request):
+    print "in render.datalib.CarbonLinkPool.send_request"
     metric = request['metric']
     serialized_request = pickle.dumps(request, protocol=-1)
     len_prefix = struct.pack("!L", len(serialized_request))
@@ -185,6 +194,7 @@ class CarbonLinkRequestError(Exception):
   pass
 
 def recv_exactly(conn, num_bytes):
+  print "in render.datalib.recv_exactly"
   buf = ''
   while len(buf) < num_bytes:
     data = conn.recv( num_bytes - len(buf) )
@@ -214,21 +224,27 @@ CarbonLink = CarbonLinkPool(hosts, settings.CARBONLINK_TIMEOUT)
 
 # Data retrieval API
 def fetchData(requestContext, pathExpr):
+  print "in render.datalib.fetchData"
   seriesList = []
   startTime = requestContext['startTime']
   endTime = requestContext['endTime']
 
+  print "[render.datalib.fetchData] st [" + str(startTime) + "] end [" + str(endTime) + "]"
   if requestContext['localOnly']:
+    print "render.datalib.fetchData: Using localstore..."
     store = LOCAL_STORE
   else:
+    print "render.datalib.fetchData: Using store..."
     store = STORE
 
   for dbFile in store.find(pathExpr):
     log.metric_access(dbFile.metric_path)
+    print "[render.datalib.fetchData] st [" + str(timestamp(startTime)) + "] end [" + str(timestamp(endTime)) + "]"
     dbResults = dbFile.fetch( timestamp(startTime), timestamp(endTime) )
     try:
-      cachedResults = CarbonLink.query(dbFile.real_metric)
-      results = mergeResults(dbResults, cachedResults)
+#      cachedResults = CarbonLink.query(dbFile.real_metric)
+#      results = mergeResults(dbResults, cachedResults)
+      results = dbResults
     except:
       log.exception()
       results = dbResults
@@ -237,15 +253,18 @@ def fetchData(requestContext, pathExpr):
       continue
 
     (timeInfo,values) = results
+    
     (start,end,step) = timeInfo
     series = TimeSeries(dbFile.metric_path, start, end, step, values)
     series.pathExpression = pathExpr #hack to pass expressions through to render functions
     seriesList.append(series)
-
+  
+  print seriesList
   return seriesList
 
 
 def mergeResults(dbResults, cacheResults):
+  print "in render.datalib.mergeResults"
   cacheResults = list(cacheResults)
 
   if not dbResults:

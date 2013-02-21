@@ -46,6 +46,7 @@ LOG_DIR = ''
 WHISPER_DIR = ''
 RRD_DIR = ''
 DATA_DIRS = []
+TSDB_HOST = ''
 
 CLUSTER_SERVERS = []
 

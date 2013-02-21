@@ -14,6 +14,7 @@ from django.core.urlresolvers import get_script_prefix
 
 def graphlot_render(request):
     """Render the main graphlot view."""
+    print "[graphlot.views.graphlot_render]"
     metrics = []
     for target in request.GET.getlist('target'):
         metrics.append(dict(name=target, yaxis="one"))
@@ -34,6 +35,7 @@ def graphlot_render(request):
 
 def get_data(request):
     """Get the data for one series."""
+    print "[graphlot.views.get_data]"
     (graphOptions, requestOptions) = parseOptions(request)
     requestContext = {
         'startTime' : requestOptions['startTime'],
@@ -57,6 +59,7 @@ def get_data(request):
 
 def find_metric(request):
     """Autocomplete helper on metric names."""
+    print "[graphlot.views.find_metric]"
     try:
         query = str( request.REQUEST['q'] )
     except:
@@ -71,6 +74,7 @@ def find_metric(request):
 
 def header(request):
   "View for the header frame of the browser UI"
+  print "[graphlot.views.header]"
   context = {
     'user' : request.user,
     'profile' : getProfile(request),
@@ -82,6 +86,7 @@ def header(request):
 
 def browser(request):
   "View for the top-level frame of the browser UI"
+  print "[graphlot.views.browser]"
   context = {
     'queryString' : request.GET.urlencode(),
     'target' : request.GET.get('target'),
@@ -95,6 +100,7 @@ def browser(request):
 
 
 def search(request):
+  print "[graphlot.views.search]"
   query = request.POST['query']
   if not query:
     return HttpResponse("")
@@ -123,6 +129,7 @@ def search(request):
 
 def myGraphLookup(request):
   "View for My Graphs navigation"
+  print "[graphlot.views.myGraphLookup]"
   profile = getProfile(request,allowDefault=False)
   assert profile
 
@@ -196,6 +203,7 @@ def myGraphLookup(request):
 
 def userGraphLookup(request):
   "View for User Graphs navigation"
+  print "[graphlot.views.userGraphLookup]"
   username = request.GET['path']
   nodes = []
 

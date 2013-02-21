@@ -6,6 +6,7 @@ from graphite.render.datalib import fetchData, TimeSeries
 
 
 def evaluateTarget(requestContext, target):
+  print "in render.evaluator.evaluateTarget"
   tokens = grammar.parseString(target)
   result = evaluateTokens(requestContext, tokens)
 
@@ -17,6 +18,7 @@ def evaluateTarget(requestContext, target):
 
 
 def evaluateTokens(requestContext, tokens):
+  print "in render.evaluator.evaluateTokens"
   if tokens.expression:
     return evaluateTokens(requestContext, tokens.expression)
 
@@ -31,10 +33,9 @@ def evaluateTokens(requestContext, tokens):
   elif tokens.number:
     if tokens.number.integer:
       return int(tokens.number.integer)
+
     elif tokens.number.float:
       return float(tokens.number.float)
-    elif tokens.number.scientific:
-      return float(tokens.number.scientific[0])
 
   elif tokens.string:
     return str(tokens.string)[1:-1]

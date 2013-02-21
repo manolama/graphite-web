@@ -12,8 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License."""
 import csv
-from datetime import datetime
-from time import time
+from time import time, strftime, localtime
 from random import shuffle
 from httplib import CannotSendRequest
 from urllib import urlencode
@@ -24,11 +23,6 @@ try:
   import cPickle as pickle
 except ImportError:
   import pickle
-
-try:  # See if there is a system installation of pytz first
-  import pytz
-except ImportError:  # Otherwise we fall back to Graphite's bundled version
-  from graphite.thirdparty import pytz
 
 from graphite.util import getProfileByUsername, json
 from graphite.remote_storage import HTTPConnectionWithTimeout
@@ -47,6 +41,7 @@ from django.conf import settings
 
 
 def renderView(request):
+  print "In render.views.RenderView..."
   start = time()
   (graphOptions, requestOptions) = parseOptions(request)
   useCache = 'noCache' not in requestOptions
@@ -121,8 +116,8 @@ def renderView(request):
 
       for series in data:
         for i, value in enumerate(series):
-          timestamp = datetime.fromtimestamp(series.start + (i * series.step), requestOptions['tzinfo'])
-          writer.writerow((series.name, timestamp.strftime("%Y-%m-%d %H:%M:%S"), value))
+          timestamp = localtime( series.start + (i * series.step) )
+          writer.writerow( (series.name, strftime("%Y-%m-%d %H:%M:%S", timestamp), value) )
 
       return response
 
@@ -171,6 +166,8 @@ def renderView(request):
   if settings.REMOTE_RENDERING: # Rendering on other machines is faster in some situations
     image = delegateRendering(requestOptions['graphType'], graphOptions)
   else:
+    print "[Render] Graph Class -->"
+    print requestOptions['graphClass']
     image = doImageRender(requestOptions['graphClass'], graphOptions)
 
   useSVG = graphOptions.get('outputFormat') == 'svg'
@@ -189,6 +186,7 @@ def renderView(request):
 
 
 def parseOptions(request):
+  print "[render.views.parseOptions]"
   queryParams = request.REQUEST
 
   # Start with some defaults
@@ -198,6 +196,8 @@ def parseOptions(request):
   graphType = queryParams.get('graphType','line')
   assert graphType in GraphTypes, "Invalid graphType '%s', must be one of %s" % (graphType,GraphTypes.keys())
   graphClass = GraphTypes[graphType]
+  print "[render.views.parseOptions] -->"
+  print graphClass
 
   # Fill in the requestOptions
   requestOptions['graphType'] = graphType
@@ -205,19 +205,7 @@ def parseOptions(request):
   requestOptions['pieMode'] = queryParams.get('pieMode', 'average')
   requestOptions['cacheTimeout'] = int( queryParams.get('cacheTimeout', settings.DEFAULT_CACHE_DURATION) )
   requestOptions['targets'] = []
-
-  # Extract the targets out of the queryParams
-  mytargets = []
-  # Normal format: ?target=path.1&target=path.2
-  if len(queryParams.getlist('target')) > 0:
-    mytargets = queryParams.getlist('target')
-
-  # Rails/PHP/jQuery common practice format: ?target[]=path.1&target[]=path.2
-  elif len(queryParams.getlist('target[]')) > 0:
-    mytargets = queryParams.getlist('target[]')
-
-  # Collect the targets
-  for target in mytargets:
+  for target in queryParams.getlist('target'):
     requestOptions['targets'].append(target)
 
   if 'pickle' in queryParams:
@@ -247,29 +235,22 @@ def parseOptions(request):
         continue
       graphOptions[opt] = val
 
-  tzinfo = pytz.timezone(settings.TIME_ZONE)
-  if 'tz' in queryParams:
-    try:
-      tzinfo = pytz.timezone(queryParams['tz'])
-    except pytz.UnknownTimeZoneError:
-      pass
-  requestOptions['tzinfo'] = tzinfo
-
   # Get the time interval for time-oriented graph types
   if graphType == 'line' or graphType == 'pie':
     if 'until' in queryParams:
-      untilTime = parseATTime(queryParams['until'], tzinfo)
+      untilTime = parseATTime( queryParams['until'] )
     else:
-      untilTime = parseATTime('now', tzinfo)
+      untilTime = parseATTime('now')
     if 'from' in queryParams:
-      fromTime = parseATTime(queryParams['from'], tzinfo)
+      fromTime = parseATTime( queryParams['from'] )
     else:
-      fromTime = parseATTime('-1d', tzinfo)
+      fromTime = parseATTime('-1d')
 
     startTime = min(fromTime, untilTime)
     endTime = max(fromTime, untilTime)
     assert startTime != endTime, "Invalid empty time range"
-
+    print "[render.views.parseOptions] st [" + str(startTime) + "] end [" + str(endTime) + "]"
+    
     requestOptions['startTime'] = startTime
     requestOptions['endTime'] = endTime
 
@@ -279,6 +260,7 @@ def parseOptions(request):
 connectionPools = {}
 
 def delegateRendering(graphType, graphOptions):
+  print "In render.views.delegateRendering..."
   start = time()
   postData = graphType + '\n' + pickle.dumps(graphOptions)
   servers = settings.RENDERING_HOSTS[:] #make a copy so we can shuffle it safely
@@ -323,6 +305,7 @@ def delegateRendering(graphType, graphOptions):
 
 def renderLocalView(request):
   try:
+    print "In render.views.renderLocalView..."
     start = time()
     reqParams = StringIO(request.raw_post_data)
     graphType = reqParams.readline().strip()
@@ -339,6 +322,7 @@ def renderLocalView(request):
 
 
 def renderMyGraphView(request,username,graphName):
+  print "In render.views.renderMyGraphView..."
   profile = getProfileByUsername(username)
   if not profile:
     return errorPage("No such user '%s'" % username)
@@ -375,17 +359,24 @@ def renderMyGraphView(request,username,graphName):
 
 
 def doImageRender(graphClass, graphOptions):
+  print "In render.views.doImageRender..."
   pngData = StringIO()
+  print "[render.views.doImageRender] Set String IO"
   t = time()
   img = graphClass(**graphOptions)
+  print "[render.views.doImageRender] Set graph class"
   img.output(pngData)
+  print "[render.views.doImageRender] Got PNG data"
   log.rendering('Rendered PNG in %.6f seconds' % (time() - t))
   imageData = pngData.getvalue()
+  print "[render.views.doImageRender] Got PNG image value"
   pngData.close()
+  print "[render.views.doImageRender] Closed image"
   return imageData
 
 
 def buildResponse(imageData, mimetype="image/png"):
+  print "In render.views.buildResponse..."
   response = HttpResponse(imageData, mimetype=mimetype)
   response['Cache-Control'] = 'no-cache'
   response['Pragma'] = 'no-cache'
@@ -393,6 +384,7 @@ def buildResponse(imageData, mimetype="image/png"):
 
 
 def errorPage(message):
+  print "In render.views.errorPage..."
   template = loader.get_template('500.html')
   context = Context(dict(message=message))
   return HttpResponseServerError( template.render(context) )

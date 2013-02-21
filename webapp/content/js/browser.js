@@ -41,10 +41,11 @@ function createTreePanel(){
 
   function setParams(loader, node) {
     var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
-    loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
+    loader.baseParams.query = (node_id == "") ? "branch:0" : (node_id);
     loader.baseParams.format = 'treejson';
     loader.baseParams.contexts = '1';
-    loader.baseParams.path = node_id;
+    loader.baseParams.branch_id = (node_id == "") ? "branch:0" : (node_id);
+    loader.baseParams.tree_id = 1;
 
     if (node.parentNode && node.parentNode.id == "UserGraphsTree") {
       loader.baseParams.user = node.id;
@@ -53,9 +54,10 @@ function createTreePanel(){
 
   var graphiteNode = new Ext.tree.AsyncTreeNode({
     id: 'GraphiteTree',
-    text: "Graphite",
+    text: "OpenTSDB",
     loader: new Ext.tree.TreeLoader({
-      url: "../metrics/find/",
+	  url: "../metrics/find/",	
+      //url: "../metrics/branch/",
       requestMethod: "GET",
       listeners: {beforeload: setParams}
     })
@@ -120,7 +122,7 @@ function createTreePanel(){
     }
 
     if (node.attributes.graphUrl) {
-      var url = node.attributes.graphUrl
+      var url = decodeURIComponent(node.attributes.graphUrl).replace(/#/,'%23');
       Composer.loadMyGraph(node.attributes.text, url);
       return;
     }

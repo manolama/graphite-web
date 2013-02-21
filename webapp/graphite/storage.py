@@ -3,6 +3,8 @@ from os.path import isdir, isfile, join, exists, splitext, basename, realpath
 import whisper
 from graphite.remote_storage import RemoteStore
 from django.conf import settings
+from graphite.logger import log
+import httplib, json, re
 
 try:
   import rrdtool
@@ -26,6 +28,8 @@ DATASOURCE_DELIMETER = '::RRD_DATASOURCE::'
 
 class Store:
   def __init__(self, directories=[], remote_hosts=[]):
+    print "Initialized the Store class with directories: "
+    print directories
     self.directories = directories
     self.remote_hosts = remote_hosts
     self.remote_stores = [ RemoteStore(host) for host in remote_hosts if not is_local_interface(host) ]
@@ -35,28 +39,63 @@ class Store:
 
 
   def get(self, metric_path): #Deprecated
+    print "Called GET()"
     for directory in self.directories:
-      relative_fs_path = metric_path.replace('.', os.sep) + '.wsp'
+      relative_fs_path = metric_path.replace('.', '/') + '.wsp'
       absolute_fs_path = join(directory, relative_fs_path)
+
+      if settings.TSDB_HOST:
+        return OpenTSDBData(absolute_fs_path, metric_path)
 
       if exists(absolute_fs_path):
         return WhisperFile(absolute_fs_path, metric_path)
+        
 
 
   def find(self, query):
-    if is_pattern(query):
-
-      for match in self.find_all(query):
+#    if query.isdigit():
+    print "storage.find: query " + query + ""
+    
+    splits = query.split(":")
+    
+    if splits[0] == "branch":
+      print "storage.find: looks like a hash"
+      for match in self.find_all(splits[1]):
         yield match
-
     else:
-      match = self.find_first(query)
-
-      if match is not None:
-        yield match
-
+      if (len(splits) > 1):
+        print "Storage.find: looks like a TSUID"
+        match = self.find_first(splits[1])
+        if match is not None:
+          yield match
+      else:
+        yield tsdb_find_specific(query)
+      
+#    elif is_pattern(query):
+#      print "find: Is a pattern"
+#      for match in self.find_all(query):
+#        yield match
+#
+#    else:
+#      print "find: Is not a pattern"
+#      match = self.find_first(query)
+#
+#      if match is not None:
+#        yield match
+    print "Finished the storage.find call"
 
   def find_first(self, query):
+    
+    if settings.TSDB_HOST:
+      print "find_first: query [" + query + "]"
+      return tsdb_find_specific(query)
+#      q = OpenTSDBData(query, query)
+#      q.fs_path = query
+#      q.name = "my metric"
+#      q.metric_path = "metric path"
+#      q.real_metric = "real metric"
+#      return q
+      
     # Search locally first
     for directory in self.directories:
       for match in find(directory, query):
@@ -71,27 +110,114 @@ class Store:
 
 
   def find_all(self, query):
+    print "find_all: query: " + query + ""
     # Start remote searches
     found = set()
-    remote_requests = [ r.find(query) for r in self.remote_stores if r.available ]
+#    remote_requests = [ r.find(query) for r in self.remote_stores if r.available ]
 
-    # Search locally
-    for directory in self.directories:
-      for match in find(directory, query):
-        if match.metric_path not in found:
-          yield match
-          found.add(match.metric_path)
+    if settings.TSDB_HOST:
+      print "Calling tsdb tree..."
+      for match in self.tsdb_tree("1", query):
+        yield match
+        found.add(match.metric_path)
+#      for match in tsdb_group(query):
+#        yield match
+#        found.add(match.metric_path)
+    else:
+      # Search locally
+      for directory in self.directories:
+        for match in find(directory, query):
+          if match.metric_path not in found:
+            print "FIND_ALL: Metric path: " + match.metric_path
+            yield match
+            found.add(match.metric_path)
+  
+      # Gather remote search results
+#      for request in remote_requests:
+#        for match in request.get_results():
+#  
+#          if match.metric_path not in found:
+#            yield match
+#            found.add(match.metric_path)
+    print "Finished the find_all call"
 
-    # Gather remote search results
-    for request in remote_requests:
-      for match in request.get_results():
+  def tsdb_tree(self, tree_id, branch_id):
+    print "Calling TSDB: \/tree\/branch\?tree_id=" + tree_id + "\&branch_id=" + branch_id
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)    
+    conn.request("GET", "/tree/branch?tree_id=" + tree_id + "&branch_id=" + branch_id)
+    resp = conn.getresponse()
+    
+    if resp.status == 200:
+      print "Received data!"
+      d = json.loads(resp.read())
+  
+      nodes = list()
+      try:
+        if (d['branches']):
+          for i in xrange(len(d['branches'])):
+            nodes.append(Branch("", "", d['branches'][i]['display_name'], d['branches'][i]['branch_id']))
+      except:
+        print "No branches for this branch"
+      try:
+        if (d['leaves']):
+          for i in xrange(len(d['leaves'])):
+            nodes.append(Leaf("", "", d['leaves'][i]['display_name'], d['leaves'][i]['tsuid']))
+      except:
+        print "No leaves for this branch"
+      for n in nodes:
+        yield n
+    else:
+      print "Failed to get data from TSDB"
 
-        if match.metric_path not in found:
-          yield match
-          found.add(match.metric_path)
-
+  def drilldown_tsdb_tree(self, tree_id, branch_id, path=""):
+  # lets us drill down into a tree for dashboards
+    if path:
+      print "[drilldown_tsdb_tree] Path: " + path
+      current_branch = "0"
+      parts_idx = 0
+      parts = path.split("|")
+      matches = list()
+      path = ""
+      while current_branch:
+        print "[drilldown_tsdb_tree] parent path: [" + path + "]"
+        if parts_idx >= len(parts):
+          local_matches = self.tsdb_tree(tree_id, current_branch)
+          for node in local_matches:
+            matches.append(node)
+          print "[drilldown_tsdb_tree] returning entire branch: [" + current_branch + "]"
+          current_branch = ""
+          continue
+        
+        print "[drilldown_tsdb_tree] part: [" + parts[parts_idx] + "]  branch [" + current_branch + "]"
+        local_matches = list(self.tsdb_tree(tree_id, current_branch))     
+              
+        for node in local_matches:
+          if parts[parts_idx] == node.name:
+            # drill down further
+            current_branch = str(node.branch_id)
+            path += node.name + "|"
+            print "[drilldown_tsdb_tree] matched part [" + parts[parts_idx] + "] on branch: " + str(current_branch)
+            break
+          else:
+            current_branch = ""
+            if len(parts[parts_idx]) < 1:
+              matches.append(node)
+            elif re.match("^" + parts[parts_idx], node.name):
+              print "[drilldown_tsdb_tree] matched regex on node: " + node.name
+              matches.append(node)
+        parts_idx += 1
+      
+      # fix up the path
+      for node in matches:
+        node.metric_path = path + node.metric_path
+        yield node
+    else:
+      matches = self.tsdb_tree(tree_id, branch_id)
+      for node in matches:
+        yield node
 
 def is_local_interface(host):
+  print "Determined the interface is local"
   if ':' in host:
     host = host.split(':',1)[0]
 
@@ -108,6 +234,7 @@ def is_local_interface(host):
         continue
 
     else:
+      print "Bound to port [" + str(port) + "] for some reason..."
       return True
 
   raise Exception("Failed all attempts at binding to interface %s, last exception was %s" % (host, e))
@@ -132,10 +259,12 @@ def find_escaped_pattern_fields(pattern_string):
 
 
 def find(root_dir, pattern):
+  print "FIND: Processing Dir: " + root_dir
+  print "FIND: Processing Pattern: " + pattern
   "Generates nodes beneath root_dir matching the given pattern"
   clean_pattern = pattern.replace('\\', '')
   pattern_parts = clean_pattern.split('.')
-
+  
   for absolute_path in _find(root_dir, pattern_parts):
 
     if DATASOURCE_DELIMETER in basename(absolute_path):
@@ -143,9 +272,11 @@ def find(root_dir, pattern):
     else:
       datasource_pattern = None
 
-    relative_path = absolute_path[ len(root_dir): ].lstrip('/')
-    metric_path = relative_path.replace('/','.')
-
+    relative_path = absolute_path[ len(root_dir): ].lstrip(os.pathsep)
+    metric_path = relative_path.replace(os.pathsep,'.')
+    print "FIND: Relative Path: " + relative_path
+    print "FIND: metric_path: " + metric_path
+    
     # Preserve pattern in resulting path for escaped query pattern elements
     metric_path_parts = metric_path.split('.')
     for field_index in find_escaped_pattern_fields(pattern):
@@ -153,13 +284,16 @@ def find(root_dir, pattern):
     metric_path = '.'.join(metric_path_parts)
 
     if isdir(absolute_path):
+      print "FIND: Absolute path found: " + absolute_path
       yield Branch(absolute_path, metric_path)
 
     elif isfile(absolute_path):
       (metric_path,extension) = splitext(metric_path)
-
+      print "FIND: Found file met [" + metric_path + "] ext [" + extension + "]"
       if extension == '.wsp':
+        #print ("ab: " + absolute_path + "  mp: " + metric_path)
         yield WhisperFile(absolute_path, metric_path)
+        #yield OpenTSDBData(absolute_path, metric_path)
 
       elif extension == '.gz' and metric_path.endswith('.wsp'):
         metric_path = splitext(metric_path)[0]
@@ -180,6 +314,8 @@ def find(root_dir, pattern):
 def _find(current_dir, patterns):
   """Recursively generates absolute paths whose components underneath current_dir
   match the corresponding pattern in patterns"""
+  print "_find: Processing Dir: " + current_dir
+  #print "_find: Processing Pattern: " + patterns
   pattern = patterns[0]
   patterns = patterns[1:]
   entries = os.listdir(current_dir)
@@ -209,7 +345,7 @@ def _find(current_dir, patterns):
     files = [e for e in entries if isfile( join(current_dir,e) )]
     matching_files = match_entries(files, pattern + '.*')
 
-    for basename in matching_files + matching_subdirs:
+    for basename in matching_subdirs + matching_files:
       yield join(current_dir, basename)
 
 
@@ -240,16 +376,80 @@ def match_entries(entries, pattern):
     matching.sort()
     return matching
 
+def tsdb_group(query):
+  if query == "*":
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+    conn.request("GET", "/group?terms=true")
+    resp = conn.getresponse()
+    
+    if resp.status == 200:
+      print "Received data!"
+      d = json.loads(resp.read())
+      print d['total_pages']
+  
+      for i in xrange(15):
+        #for item in d['results'][key]:
+          #print key + "." + item['metric']
+          #metrics.append(d['results'][i])
+          host = d['results'][i].replace(".", "_")
+          yield Branch(host, host)
+  else:
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+    host = query.replace(".*", "").replace("_", ".")
+    url = "/search?query=host:" + host + "*"
+    print "Querying: " + url
+    conn.request("GET", url)
+    resp = conn.getresponse()
+    
+    if resp.status == 200:
+      print "Received data!"
+      d = json.loads(resp.read())
+      for ts in d['results']:
+        yield OpenTSDBData(ts['tsuid'], ts['metric'])
+
+def tsdb_find_specific(query):
+  print "in storage.tsdb_find_Specific(): " + query
+
+  conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+  url = "/meta/timeseries?uid=" + query
+  print "Calling URL: " + url
+  conn.request("GET", url)
+  resp = conn.getresponse()
+  
+  if resp.status == 200:
+    print "Received data!"
+    d = json.loads(resp.read())
+    
+    leaf = OpenTSDBData(query, query)
+    
+    tags = ""
+    for x in range(len(d['tags'])):
+      if d['tags'][x]['type'] == "TAGV":
+        if (len(tags) > 1):
+          tags += " | "
+        tags += d['tags'][x]['name']
+    
+    leaf.metric_path = d['metric']['name'] + ": " + tags
+    return leaf
+  else:
+    print "WARNING: Couldn't match the metric in opentsdb"
+    return None        
 
 # Node classes
 class Node:
   context = {}
 
-  def __init__(self, fs_path, metric_path):
+  def __init__(self, fs_path, metric_path, branch_name="", branch_id=0, tsuid=0):
     self.fs_path = str(fs_path)
-    self.metric_path = str(metric_path)
-    self.real_metric = str(metric_path)
-    self.name = self.metric_path.split('.')[-1]
+    self.metric_path = str(branch_name)
+    self.real_metric = str(branch_name)
+    if branch_name:
+      self.name = branch_name
+    else:
+      self.name = self.metric_path.split('.')[-1]
+    self.branch_id = branch_id
+    self.tsuid = tsuid
+    #print "NODE: fs [" + self.fs_path + "] met [" + self.metric_path +"] name [" + self.name + "]"
 
   def getIntervals(self):
     return []
@@ -262,6 +462,7 @@ class Branch(Node):
   "Node with children"
   def fetch(self, startTime, endTime):
     "No-op to make all Node's fetch-able"
+    print "Fetching on a branch, does NOTHING!"
     return []
 
   def isLeaf(self):
@@ -273,7 +474,77 @@ class Leaf(Node):
   def isLeaf(self):
     return True
 
+# CL Trying to hack this stuff
+class OpenTSDBData(Leaf):
+  cached_context_data = None
+  
+  def __init__(self, *args, **kwargs):
+    print "Initialized an OpenTSDBData leaf"
+    Leaf.__init__(self, *args, **kwargs)
+    
+  def getIntervals(self):
+    start = 0
+    end = int(time.time())
+    return [ (start, end) ]
 
+  def fetch(self, startTime, endTime):
+    print "OpenTSDBData.fetch: Start time: [" + str(startTime) + "] end: [" + str(endTime) + "]"
+
+    tsd_url = "/q?start=" + str(int(startTime)) + "&end=" + str(int(endTime)) + "&tsuids=none:" + self.fs_path
+    print ("OpenTSDBData.fetch: Calling url: " + tsd_url)
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+    conn.request("GET", tsd_url)
+    print ("OpenTSDBData.fetch: Finished the request...")
+       
+    print ("OpenTSDBData.fetch: Getting response...")
+    resp = conn.getresponse()
+    if resp.status == 200:
+      print ("OpenTSDBData.fetch: Response was ok!!")
+      jd = resp.read()
+      d = json.loads(jd)
+      ts_delta = list()
+      valueList = list()
+      
+      if d and len(d) > 0 and 'dps' in d[0]:
+        counter = 0
+        last_ts = 0
+        for key in sorted(d[0]['dps'].iterkeys()):
+          if key < startTime:
+            continue
+          valueList.append(d[0]['dps'][key])
+          counter += 1
+          
+          if last_ts > 0:
+            ts_delta.append(int(key) - last_ts)
+            last_ts = int(key)
+          else:
+            last_ts = int(key)
+          
+#          if counter >= len(valueList):
+#            break;
+        print "Retrieved [" + str(counter) + "] datapoints"
+        
+        step = 0
+        if len(ts_delta) > 1:
+          total = 0
+          for i in ts_delta:
+            total += i
+          step = total / len(ts_delta)
+        timeInfo = (startTime, endTime, step)
+        print ("OpenTSDBData.fetch: set timeInfo")    
+        
+      else:
+        print ("OpenTSDBData.fetch: Couldn't find the data points")
+        log.info("Couldn't find the data points")
+        return None
+    else:
+      print ("OpenTSDBData.fetch: Failed to get any data")
+      log.info("Failed to get any data")
+      return None
+    
+    conn.close()
+    return (timeInfo, valueList)
+    
 # Database File classes
 class WhisperFile(Leaf):
   cached_context_data = None
@@ -295,7 +566,9 @@ class WhisperFile(Leaf):
     return [ (start, end) ]
 
   def fetch(self, startTime, endTime):
-    return whisper.fetch(self.fs_path, startTime, endTime)
+    print "Fetching a whisper value"
+    (timeInfo,values) = whisper.fetch(self.fs_path, startTime, endTime)
+    return (timeInfo,values)
 
   @property
   def context(self):
@@ -327,6 +600,7 @@ class GzippedWhisperFile(WhisperFile):
   extension = '.wsp.gz'
 
   def fetch(self, startTime, endTime):
+    print "Fetching a gzipped whisper file"
     if not gzip:
       raise Exception("gzip module not available, GzippedWhisperFile not supported")
 
@@ -391,6 +665,7 @@ class RRDDataSource(Leaf):
     return [ (start, end) ]
 
   def fetch(self, startTime, endTime):
+    print "Fetching an RRD Data source"
     startString = time.strftime("%H:%M_%Y%m%d+%Ss", time.localtime(startTime))
     endString = time.strftime("%H:%M_%Y%m%d+%Ss", time.localtime(endTime))
 

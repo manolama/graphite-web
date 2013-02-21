@@ -18,36 +18,16 @@ from django.conf import settings
 from graphite.account.models import Profile
 from graphite.util import getProfile, getProfileByUsername, defaultUser, json
 from graphite.logger import log
-from graphite.storage import STORE, LOCAL_STORE, RRDFile
+from graphite.storage import STORE, LOCAL_STORE
 from graphite.metrics.search import searcher
 from graphite.render.datalib import CarbonLink
-import fnmatch, os
+import fnmatch, os, re
 
 try:
   import cPickle as pickle
 except ImportError:
   import pickle
 
-
-# link-compatible walk since we frequently symlink RRD_DIR
-# and python < 2.6.0 doesn't suppport os.walk followlinks
-def do_walk_rrd_dirs(start_path, matches=None):
-  if matches == None:
-    matches = []
-  for root, dirs, files in os.walk(start_path):
-    for dir in dirs:
-      if os.path.islink(os.path.join(root,dir)):
-        do_walk_rrd_dirs(os.path.join(root,dir), matches)
-    root = root.replace(settings.RRD_DIR, '')
-    for basename in files:
-      if fnmatch.fnmatch(basename, '*.rrd'):
-        absolute_path = os.path.join(settings.RRD_DIR, root, basename)
-        (basename,extension) = os.path.splitext(basename)
-        metric_path = os.path.join(root, basename)
-        rrd = RRDFile(absolute_path, metric_path)
-        for datasource_name in rrd.getDataSources():
-          matches.append(os.path.join(metric_path, datasource_name.name))
-  return matches
 
 def index_json(request):
   jsonp = request.REQUEST.get('jsonp', False)
@@ -59,10 +39,7 @@ def index_json(request):
       if fnmatch.fnmatch(basename, '*.wsp'):
         matches.append(os.path.join(root, basename))
 
-  for match in do_walk_rrd_dirs(settings.RRD_DIR):
-    matches.append(match)
-
-  matches = [ m.replace('.wsp','').replace('.rrd','').replace('/', '.') for m in sorted(matches) ]
+  matches = [ m.replace('.wsp','').replace('/', '.') for m in sorted(matches) ]
   if jsonp:
     return HttpResponse("%s(%s)" % (jsonp, json.dumps(matches)), mimetype='text/javascript')
   else:
@@ -70,10 +47,8 @@ def index_json(request):
 
 
 def search_view(request):
-  try:
-    query = str( request.REQUEST['query'] )
-  except:
-    return HttpResponseBadRequest(content="Missing required parameter 'query'", mimetype="text/plain")
+  print "In metrics.search_view()"
+  query = str(request.REQUEST['query'].strip())
   search_request = {
     'query' : query,
     'max_results' : int( request.REQUEST.get('max_results', 25) ),
@@ -88,6 +63,7 @@ def search_view(request):
 
 
 def context_view(request):
+  print "In metrics.context_view()"
   if request.method == 'GET':
     contexts = []
 
@@ -123,6 +99,7 @@ def context_view(request):
 
 def find_view(request):
   "View for finding metrics matching a given pattern"
+  print "In metrics.find_view()"
   profile = getProfile(request)
   format = request.REQUEST.get('format', 'treejson')
   local_only = int( request.REQUEST.get('local', 0) )
@@ -146,6 +123,7 @@ def find_view(request):
     store = STORE
 
   if format == 'completer':
+    print "Format is completer"
     query = query.replace('..', '*.')
     if not query.endswith('*'):
       query += '*'
@@ -201,6 +179,7 @@ def find_view(request):
 
 def expand_view(request):
   "View for expanding a pattern into matching metric paths"
+  print "In metrics.expand_view()"
   local_only    = int( request.REQUEST.get('local', 0) )
   group_by_expr = int( request.REQUEST.get('groupByExpr', 0) )
   leaves_only   = int( request.REQUEST.get('leavesOnly', 0) )
@@ -317,9 +296,14 @@ def tree_json(nodes, base_path, wildcards=False, contexts=False):
       continue
 
     found.add(node.name)
+    if node.isLeaf():
+      nid = "leaf:"
+    else:
+      nid = "branch:"
     resultNode = {
       'text' : str(node.name),
-      'id' : base_path + str(node.name),
+      #'id' : base_path + str(node.name),
+      'id' : nid + str(node.branch_id),
     }
 
     if contexts:
@@ -338,6 +322,116 @@ def tree_json(nodes, base_path, wildcards=False, contexts=False):
   results.extend(results_leaf)
   return json.dumps(results)
 
+def branch_view(request):
+  "View for fetching metrics from a branch in OpenTSDB"
+  print "In metrics.views.branch_view()"
+  profile = getProfile(request)
+  format = request.REQUEST.get('format', 'treejson')
+  local_only = int( request.REQUEST.get('local', 0) )
+  contexts = int( request.REQUEST.get('contexts', 0) )
+  wildcards = int( request.REQUEST.get('wildcards', 0) )
+  automatic_variants = int( request.REQUEST.get('automatic_variants', 0) )
+  query = ""
+  
+  if request.REQUEST.get('query'):
+    query = request.REQUEST.get('query')
+  if request.REQUEST.get('pattern'):
+    print "Pattern: " + request.REQUEST.get('pattern')
+  print "metrics.views.branch_view  Query: " + query
+  store = STORE
+  
+  try:
+    tree_id = request.REQUEST['tree_id']
+  except:
+    return HttpResponseBadRequest(content="Missing required parameter 'tree_id'", mimetype="text/plain")
+  
+  try:
+    branch_id = request.REQUEST['branch_id']
+  except:
+    return HttpResponseBadRequest(content="Missing required parameter 'branch_id'", mimetype="text/plain")
+  
+  if format == 'treejson':
+    print "In metrics.views.find_view().treejson"
+    matches = list(store.tsdb_tree(tree_id, branch_id))
+    content = tsdb_tree_json(matches, contexts=contexts)
+    response = HttpResponse(content, mimetype='application/json')
+
+  elif format == 'pickle':
+    print "In metrics.views.find_view().pickle"
+    matches = list(store.tsdb_tree(tree_id, branch_id))
+    content = pickle_nodes(matches, contexts=contexts)
+    response = HttpResponse(content, mimetype='application/pickle')
+
+  elif format == 'completer':
+    print "In metrics.views.find_view().completer"
+    matches = list(store.drilldown_tsdb_tree(tree_id, branch_id, query))
+    #if len(matches) == 1 and (not matches[0].isLeaf()) and query == matches[0].metric_path + '*': # auto-complete children
+    #  matches = list( store.find(query + '.*') )
+    results = []
+    for node in matches:
+      node_info = dict(path=node.metric_path, name=node.name, is_leaf=str(int(node.isLeaf())))
+      if not node.isLeaf():
+        node_info['path'] += '|'
+      node_info['id'] = node.branch_id
+      results.append(node_info)
+
+    if len(results) > 1 and wildcards:
+      wildcardNode = {'name' : '*'}
+      results.append(wildcardNode)
+
+    content = json.dumps({ 'metrics' : results })
+    response = HttpResponse(content, mimetype='application/json')
+
+  else:
+    return HttpResponseBadRequest(content="Invalid value for 'format' parameter", mimetype="text/plain")
+
+  response['Pragma'] = 'no-cache'
+  response['Cache-Control'] = 'no-cache'
+  return response
+
+def tsdb_tree_json(nodes, contexts=False):
+  results = []
+
+  branchNode = {
+    'allowChildren': 1,
+    'expandable': 1,
+    'leaf': 0,
+  }
+  leafNode = {
+    'allowChildren': 0,
+    'expandable': 0,
+    'leaf': 1,
+  }
+
+  found = set()
+  results_leaf = []
+  results_branch = []
+  for node in nodes: #Now let's add the matching children
+    if node.name in found:
+      continue
+
+    found.add(node.name)
+    resultNode = {
+      'text' : str(node.name),
+      'id' : node.branch_id,
+      'loaded' : 0,
+    }
+
+    if contexts:
+      resultNode['context'] = node.context
+    else:
+      resultNode['context'] = {}
+
+    if node.isLeaf():
+      resultNode.update(leafNode)
+      results_leaf.append(resultNode)
+    else:
+      resultNode.update(branchNode)
+      results_branch.append(resultNode)
+
+  results.extend(results_branch)
+  results.extend(results_leaf)
+  return json.dumps(results)
 
 def pickle_nodes(nodes, contexts=False):
   if contexts:
