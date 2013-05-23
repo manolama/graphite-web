@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 # Django settings for graphite project.
 # DO NOT MODIFY THIS FILE DIRECTLY - use local_settings.py instead
-import sys, os
+import sys, os, time
 from django import VERSION as DJANGO_VERSION
 from os.path import abspath, dirname, join
 
@@ -22,10 +22,12 @@ try:
 except ImportError:
   rrdtool = False
 
-GRAPHITE_WEB_APP_SETTINGS_LOADED = False
+os.environ['TZ'] = 'UTC'
+
+_APP_SETTINGS_LOADED = False
 WEBAPP_VERSION = '0.9.10'
-DEBUG = False
-JAVASCRIPT_DEBUG = False
+DEBUG = True
+JAVASCRIPT_DEBUG = True
 
 # Filesystem layout
 WEB_DIR = dirname( abspath(__file__) )
@@ -47,6 +49,7 @@ WHISPER_DIR = ''
 RRD_DIR = ''
 DATA_DIRS = []
 TSDB_HOST = ''
+TSDB_PORT = 4242
 
 CLUSTER_SERVERS = []
 
@@ -55,6 +58,7 @@ sys.path.insert(0, WEBAPP_DIR)
 sys.path.append(THIRDPARTY_DIR)
 
 # Memcache settings
+#MEMCACHE_HOSTS = ["localhost:11211"]
 MEMCACHE_HOSTS = []
 DEFAULT_CACHE_DURATION = 60 #metric data and graphs are cached for one minute by default
 LOG_CACHE_PERFORMANCE = False
@@ -72,7 +76,7 @@ REMOTE_RENDER_CONNECT_TIMEOUT = 1.0
 LOG_RENDERING_PERFORMANCE = False
 
 #Miscellaneous settings
-CARBONLINK_HOSTS = ["127.0.0.1:7002"]
+CARBONLINK_HOSTS = []
 CARBONLINK_TIMEOUT = 1.0
 SMTP_SERVER = "localhost"
 DOCUMENTATION_URL = "http://graphite.readthedocs.org/"
@@ -104,6 +108,17 @@ DATABASE_PASSWORD = ''				# Not used with sqlite3.
 DATABASE_HOST = ''				# Set to empty string for localhost. Not used with sqlite3.
 DATABASE_PORT = ''				# Set to empty string for default. Not used with sqlite3.
 
+DATABASES = {
+  'default' : {
+    'ENGINE' : 'django.db.backends.sqlite3',
+    'NAME' : 'graphite',
+    'USER' : '',
+    'PASSWORD' : '',
+    'HOST' : '',
+    'PORT' : ''
+  }
+}
+
 # If using rrdcached, set to the address or socket of the daemon
 FLUSHRRDCACHED = ''
 
@@ -114,7 +129,7 @@ except ImportError:
   print >> sys.stderr, "Could not import graphite.local_settings, using defaults!"
 
 ## Load Django settings if they werent picked up in local_settings
-if not GRAPHITE_WEB_APP_SETTINGS_LOADED:
+if not _APP_SETTINGS_LOADED:
   from graphite.app_settings import *
 
 ## Set config dependent on flags set in local_settings
@@ -140,14 +155,17 @@ if not INDEX_FILE:
 if not LOG_DIR:
   LOG_DIR = join(STORAGE_DIR, 'log', 'webapp')
 if not WHISPER_DIR:
-  WHISPER_DIR = join(STORAGE_DIR, 'whisper/')
+  WHISPER_DIR = join(STORAGE_DIR, 'whisper\\')
 if not RRD_DIR:
-  RRD_DIR = join(STORAGE_DIR, 'rrd/')
+  RRD_DIR = join(STORAGE_DIR, 'rrd\\')
 if not DATA_DIRS:
   if rrdtool and os.path.exists(RRD_DIR):
-    DATA_DIRS = [WHISPER_DIR, RRD_DIR]
+    DATA_DIRS = [RRD_DIR]
   else:
-    DATA_DIRS = [WHISPER_DIR]
+    #if not TSDB_HOST:
+      DATA_DIRS = [WHISPER_DIR]
+    #else:
+    #  DATA_DIRS = [TSDB_HOST]
 
 # Default sqlite db file
 # This is set here so that a user-set STORAGE_DIR is available
