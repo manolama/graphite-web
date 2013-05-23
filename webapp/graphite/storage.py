@@ -58,7 +58,7 @@ class Store:
     
     splits = query.split(":")
     
-    if splits[0] == "branch":
+    if splits[0] == "branch" or splits[0] == "*":
       print "storage.find: looks like a hash"
       for match in self.find_all(splits[1]):
         yield match
@@ -142,11 +142,13 @@ class Store:
     print "Finished the find_all call"
 
   def tsdb_tree(self, tree_id, branch_id):
-    print "Calling TSDB: \/tree\/branch\?tree_id=" + tree_id + "\&branch_id=" + branch_id
-    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)    
-    conn.request("GET", "/tree/branch?tree_id=" + tree_id + "&branch_id=" + branch_id)
+    print "Calling TSDB: \/api\/tree\/branch\?branch=" + branch_id
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, settings.TSDB_PORT)    
+    conn.request("GET", "/api/tree/branch?branch=" + branch_id)
+    print conn.request
     resp = conn.getresponse()
     
+    print "Sent call for tree"
     if resp.status == 200:
       print "Received data!"
       d = json.loads(resp.read())
@@ -155,13 +157,13 @@ class Store:
       try:
         if (d['branches']):
           for i in xrange(len(d['branches'])):
-            nodes.append(Branch("", "", d['branches'][i]['display_name'], d['branches'][i]['branch_id']))
+            nodes.append(Branch("", "", d['branches'][i]['displayName'], d['branches'][i]['branchId']))
       except:
         print "No branches for this branch"
       try:
         if (d['leaves']):
           for i in xrange(len(d['leaves'])):
-            nodes.append(Leaf("", "", d['leaves'][i]['display_name'], d['leaves'][i]['tsuid']))
+            nodes.append(Leaf("", "", d['leaves'][i]['displayName'], d['leaves'][i]['tsuid']))
       except:
         print "No leaves for this branch"
       for n in nodes:
@@ -378,7 +380,7 @@ def match_entries(entries, pattern):
 
 def tsdb_group(query):
   if query == "*":
-    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, settings.TSDB_PORT)
     conn.request("GET", "/group?terms=true")
     resp = conn.getresponse()
     
@@ -394,7 +396,7 @@ def tsdb_group(query):
           host = d['results'][i].replace(".", "_")
           yield Branch(host, host)
   else:
-    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, settings.TSDB_PORT)
     host = query.replace(".*", "").replace("_", ".")
     url = "/search?query=host:" + host + "*"
     print "Querying: " + url
@@ -409,9 +411,11 @@ def tsdb_group(query):
 
 def tsdb_find_specific(query):
   print "in storage.tsdb_find_Specific(): " + query
-
-  conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
-  url = "/meta/timeseries?uid=" + query
+  if (query == "*"):
+    return None
+  
+  conn = httplib.HTTPConnection(settings.TSDB_HOST, settings.TSDB_PORT)
+  url = "/api/uid/tsmeta?tsuid=" + query
   print "Calling URL: " + url
   conn.request("GET", url)
   resp = conn.getresponse()
@@ -432,7 +436,8 @@ def tsdb_find_specific(query):
     leaf.metric_path = d['metric']['name'] + ": " + tags
     return leaf
   else:
-    print "WARNING: Couldn't match the metric in opentsdb"
+    print "WARNING: Couldn't make the Metadata call successfully"
+    print resp.status
     return None        
 
 # Node classes
@@ -490,9 +495,9 @@ class OpenTSDBData(Leaf):
   def fetch(self, startTime, endTime):
     print "OpenTSDBData.fetch: Start time: [" + str(startTime) + "] end: [" + str(endTime) + "]"
 
-    tsd_url = "/q?start=" + str(int(startTime)) + "&end=" + str(int(endTime)) + "&tsuids=none:" + self.fs_path
+    tsd_url = "/api/query?start=" + str(int(startTime)) + "&end=" + str(int(endTime)) + "&tsuid=sum:1m-avg:" + self.fs_path
     print ("OpenTSDBData.fetch: Calling url: " + tsd_url)
-    conn = httplib.HTTPConnection(settings.TSDB_HOST, 4242)
+    conn = httplib.HTTPConnection(settings.TSDB_HOST, settings.TSDB_PORT)
     conn.request("GET", tsd_url)
     print ("OpenTSDBData.fetch: Finished the request...")
        
@@ -502,35 +507,46 @@ class OpenTSDBData(Leaf):
       print ("OpenTSDBData.fetch: Response was ok!!")
       jd = resp.read()
       d = json.loads(jd)
-      ts_delta = list()
-      valueList = list()
+      expected_dps = int((endTime - startTime) / 60)
+      valueList = list(None for i in range(expected_dps))
       
       if d and len(d) > 0 and 'dps' in d[0]:
         counter = 0
-        last_ts = 0
-        for key in sorted(d[0]['dps'].iterkeys()):
-          if key < startTime:
+        keys = sorted(d[0]['dps'].iterkeys())
+        first_ts = int(keys[0])
+        print "First ts: " + str(first_ts)
+        
+        if (first_ts >= int(startTime)):
+          cur_ts = int(startTime)
+          while (cur_ts < first_ts):
+            counter += 1
+            cur_ts += 60
+            if (counter > expected_dps):
+              break;
+        print "Starting counter at: " + str(counter)
+        
+        for key in keys:
+          if (int(key) < int(startTime)):
+            print "Key was less than start time: " + str(key)
             continue
-          valueList.append(d[0]['dps'][key])
-          counter += 1
+          elif (int(key) > int(endTime)):
+            print "Key " + str(key) + " was greater than end time: " + str(int(endTime))
+            break
           
-          if last_ts > 0:
-            ts_delta.append(int(key) - last_ts)
-            last_ts = int(key)
-          else:
-            last_ts = int(key)
+          valueList[counter] = d[0]['dps'][key]
+          counter += 1
           
 #          if counter >= len(valueList):
 #            break;
         print "Retrieved [" + str(counter) + "] datapoints"
         
-        step = 0
-        if len(ts_delta) > 1:
-          total = 0
-          for i in ts_delta:
-            total += i
-          step = total / len(ts_delta)
-        timeInfo = (startTime, endTime, step)
+#        step = 0
+#        if len(ts_delta) > 1:
+#          total = 0
+#          for i in ts_delta:
+#            total += i
+#          step = total / len(ts_delta)
+        timeInfo = (startTime, endTime, 60)
         print ("OpenTSDBData.fetch: set timeInfo")    
         
       else:

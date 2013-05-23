@@ -506,7 +506,7 @@ class LineGraph(Graph):
   validPieModes = ('maximum', 'minimum', 'average')
 
   def drawGraph(self,**params):
-    print "[render.glyph.drawGraph]"
+    #print "[render.glyph.drawGraph]"
     # Make sure we've got datapoints to draw
     if self.data:
       startTime = min([series.start for series in self.data])
@@ -523,7 +523,7 @@ class LineGraph(Graph):
       self.drawText("No Data", x, y, align='center')
       return
 
-    print "[render.glyph.drawGraph] Data: " + str(self.data)
+    #print "[render.glyph.drawGraph] Data: " + str(self.data)
 
     # Determine if we're doing a 2 y-axis graph.
     for series in self.data:
@@ -679,7 +679,7 @@ class LineGraph(Graph):
     self.drawLines()
 
   def drawVTitle(self, text, rightAlign=False):
-    print "[render.glyph.drawVTitle]"
+    #print "[render.glyph.drawVTitle]"
     lineHeight = self.getExtents()['maxHeight']
 
     if rightAlign:
@@ -941,7 +941,7 @@ class LineGraph(Graph):
     self.ctx.clip()
 
   def consolidateDataPoints(self):
-    print "[render.glyph.consolidateDataPoints]"
+    #print "[render.glyph.consolidateDataPoints]"
     numberOfPixels = self.graphWidth = self.area['xmax'] - self.area['xmin'] - (self.lineWidth + 1)
     for series in self.data:
       numberOfDataPoints = self.timeRange/series.step
@@ -957,7 +957,7 @@ class LineGraph(Graph):
         series.xStep = bestXStep
 
   def setupYAxis(self):
-    print "[render.glyph.setupYAxis]"
+    #print "[render.glyph.setupYAxis]"
     seriesWithMissingValues = [ series for series in self.data if None in series ]
 
     if self.params.get('drawNullAsZero') and seriesWithMissingValues:
@@ -1296,7 +1296,7 @@ class LineGraph(Graph):
 
 
   def drawLabels(self):
-    print "[render.glyph.drawLabels]"
+    #print "[render.glyph.drawLabels]"
     #Draw the Y-labels
     if not self.params.get('hideYAxis'):
       if not self.secondYAxis:
