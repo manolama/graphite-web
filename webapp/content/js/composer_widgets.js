@@ -10,21 +10,7 @@
  *    distributed under the License is distributed on an "AS IS" BASIS,
  *    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  *    See the License for the specific language governing permissions and
- *    limitations under the License. 
- * 
- * 
- * ======================================================================
- * 
- *     PLEASE DO NOT USE A COMMA AFTER THE FINAL ITEM IN A LIST.
- * 
- * ======================================================================
- * 
- * It works fine in FF / Chrome, but completely breaks Internet Explorer. 
- * Thank you.  
- * 
-*/
-
-
+ *    limitations under the License. */
 
 var DEFAULT_WINDOW_WIDTH = 600;
 var DEFAULT_WINDOW_HEIGHT = 400;
@@ -43,7 +29,6 @@ function createComposerWindow(myComposer) {
     '-',
     createToolbarButton('Select a Date Range', 'calBt.gif', toggleWindow(createCalendarWindow) ),
     createToolbarButton('Select Recent Data', 'arrow1.gif', toggleWindow(createRecentWindow) ),
-    createToolbarButton('Open in Graphlot', 'line_chart.png', function() { window.open('/graphlot/?' + Composer.url.queryString,'_blank') }),
     '-',
     timeDisplay
   ];
@@ -900,8 +885,7 @@ function createFunctionsMenu() {
         {text: 'Min Values', handler: applyFuncToAll('minSeries')},
         {text: 'Max Values', handler: applyFuncToAll('maxSeries')},
         {text: 'Group', handler: applyFuncToAll('group')},
-        {text: 'Range', handler: applyFuncToAll('rangeOfSeries')},
-        {text: 'Count', handler: applyFuncToEach('countSeries')}
+        {text: 'Range', handler: applyFuncToAll('rangeOfSeries')}
       ]
     }, {
       text: 'Transform',
@@ -940,8 +924,8 @@ function createFunctionsMenu() {
           menu: [
             {text: 'Remove Above Value', handler: applyFuncToEachWithInput('removeAboveValue', 'Set any values above ___ to None')},
             {text: 'Remove Above Percentile', handler: applyFuncToEachWithInput('removeAbovePercentile', 'Set any values above the ___th percentile to None')},
-            {text: 'Remove Below Value', handler: applyFuncToEachWithInput('removeBelowValue', 'Set any values below ___ to None')},
-            {text: 'Remove Below Percentile', handler: applyFuncToEachWithInput('removeBelowPercentile', 'Set any values below the ___th percentile to None')}
+            {text: 'Remove Below Value', handler: applyFuncToEachWithInput('removeAboveValue', 'Set any values above ___ to None')},
+            {text: 'Remove Below Percentile', handler: applyFuncToEachWithInput('removeAbovePercentile', 'Set any values above the ___th percentile to None')}
           ]
         },
         {text: 'Most Deviant', handler: applyFuncToEachWithInput('mostDeviant', 'Draw the ___ metrics with the highest standard deviation')},
@@ -980,16 +964,11 @@ function createFunctionsMenu() {
         		]},
         {text: 'Color', handler: applyFuncToEachWithInput('color', 'Set the color for this graph target', {quote: true})},
         {text: 'Alpha', handler: applyFuncToEachWithInput('alpha', 'Set the alpha (transparency) for this graph target (between 0.0 and 1.0)')},
-        {text: 'Consolidate By',
-                menu: [
-                        {text: "Sum", handler: applyFuncToEach('consolidateBy', '"sum"')},
-                        {text: "Max", handler: applyFuncToEach('consolidateBy', '"max"')},
-                        {text: "Min", handler: applyFuncToEach('consolidateBy', '"min"')}
-                      ]},
+        {text: 'Aggregate By Sum', handler: applyFuncToEach('cumulative')},
         {text: 'Draw non-zero As Infinite', handler: applyFuncToEach('drawAsInfinite')},
         {text: 'Line Width', handler: applyFuncToEachWithInput('lineWidth', 'Please enter a line width for this graph target')},
         {text: 'Dashed Line', handler: applyFuncToEach('dashed')},
-        {text: 'Keep Last Value', handler: applyFuncToEachWithInput('keepLastValue', 'Please enter the maximum number of "None" datapoints to overwrite, or leave empty for no limit. (default: empty)', {allowBlank: true})},
+        {text: 'Keep Last Value', handler: applyFuncToEach('keepLastValue')},
         {text: 'Transform Nulls', handler: applyFuncToEachWithInput('transformNull', 'Please enter the value to transform null values to')},
         {text: 'Substring', handler: applyFuncToEachWithInput('substr', 'Enter a starting position')},
         {text: 'Group', handler: applyFuncToAll('group')},
@@ -1048,7 +1027,7 @@ function createOptionsMenu() {
 
   var yAxisLeftMenu = new Ext.menu.Menu({
     items: [
-      menuInputItem("Left Y Label", "vtitle", "Left Y Label", /^$/),
+      menuInputItem("Left Y Label", "vtitle"),
       menuInputItem("Left Y Minimum", "yMinLeft"),
       menuInputItem("Left Y Maximum", "yMaxLeft"),
       menuInputItem("Left Y Limit", "yLimitLeft"),
@@ -1061,7 +1040,7 @@ function createOptionsMenu() {
   });
   var yAxisRightMenu = new Ext.menu.Menu({
     items: [
-      menuInputItem("Right Y Label", "vtitleRight", "Right Y Label", /^$/),
+      menuInputItem("Right Y Label", "vtitleRight"),
       menuInputItem("Right Y Minimum", "yMinRight"),
       menuInputItem("Right Y Maximum", "yMaxRight"),
       menuInputItem("Right Y Limit", "yLimitRight"),
@@ -1082,13 +1061,11 @@ function createOptionsMenu() {
 
   var yAxisMenu = new Ext.menu.Menu({
     items: [
-      menuInputItem("Label", "vtitle", "Y-Axis Label", /^$/),
+      menuInputItem("Label", "vtitle"),
       menuInputItem("Minimum", "yMin"),
       menuInputItem("Maximum", "yMax"),
       menuInputItem("Minor Lines", "minorY", "Enter the number of minor lines to draw", /^[a-zA-Z]/),
       menuInputItem("Logarithmic Scale", "logBase", "Enter the logarithmic base to use (ie. 10, e, etc...)"),
-      menuInputItem("Step", "yStep", "Enter the Y-axis step to use (e.g. 0.2)"),
-      menuInputItem("Divisors", "yDivisors", "Enter the target number of intermediate Y-axis values (e.g. 4,5,6)", /^[a-zA-Z]/),
       {text: "Unit", menu: yAxisUnitMenu},
       {text: "Side", menu: yAxisSideMenu},
       {text: "Dual Y-Axis Options", menu: SecondYAxisMenu},
@@ -1099,8 +1076,8 @@ function createOptionsMenu() {
   var xAxisMenu = new Ext.menu.Menu({
     items: [
       menuInputItem("Time Format", "xFormat", "Enter the time format (see Python's datetime.strftime())", /^$/),
-      menuInputItem("Timezone", "tz", "Enter the timezone to display (e.g. UTC or America/Chicago)", /^$/),
-      menuInputItem("Point-width Consolidation Threshold", "minXStep", "Enter the closest number of pixels between points before consolidation")
+      menuInputItem("Timezone", "tz", "Enter the timezone to display (e.g. UTC or America/Chicago)"),
+      menuInputItem("Point-width Consolidation Threshold", "minXStep", "Enter the closest number of pixels between points before consolidation"),
     ]
   });
 
@@ -1118,7 +1095,6 @@ function createOptionsMenu() {
         menuRadioItem("line", "Slope Line (default)", "lineMode", ""),
         menuRadioItem("line", "Staircase Line", "lineMode", "staircase"),
         menuRadioItem("line", "Connected Line", "lineMode", "connected"),
-        menuInputItem("Connected Line Limit", "connectedLimit", "The number of consecutive None values to jump over when in connected line mode. (default: no limit, leave empty)"),
         menuCheckItem("Draw Null as Zero", "drawNullAsZero")
     ]
   });
@@ -1140,7 +1116,7 @@ function createOptionsMenu() {
         menu: {
           items: [
             menuCheckItem("Italics", "fontItalic"),
-            menuCheckItem("Bold", "fontBold")
+            menuCheckItem("Bold", "fontBold"),
           ]
         }
       },
@@ -1180,7 +1156,7 @@ function createOptionsMenu() {
       menuCheckItem("Hide Axes", "hideAxes"),
       menuCheckItem("Hide Y-Axis", "hideYAxis"),
       menuCheckItem("Hide Grid", "hideGrid"),
-      menuInputItem("Apply Template", "template", "Enter the name of a template defined in graphTemplates.conf", /^$/)
+      menuInputItem("Apply Template", "template", "Enter the name of a template defined in graphTemplates.conf", /^$/),
     ]
   });
 
@@ -1237,7 +1213,7 @@ function menuHelpItem(name, message) {
 function paramPrompt(question, param, regexp) {
 
   if(regexp == null) {
-    regexp = /[^A-Za-z0-9_.\-]/;
+    regexp = /[^A-Za-z0-9_.]/;
   }
 
   return function (menuItem, e) {

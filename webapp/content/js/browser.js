@@ -41,10 +41,10 @@ function createTreePanel(){
 
   function setParams(loader, node) {
     var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
-    loader.baseParams.query = (node_id == "") ? "branch:0" : (node_id);
+    loader.baseParams.query = (node_id == "") ? "branch:0001" : (node_id);
     loader.baseParams.format = 'treejson';
     loader.baseParams.contexts = '1';
-    loader.baseParams.branch_id = (node_id == "") ? "branch:0" : (node_id);
+    loader.baseParams.branch_id = (node_id == "") ? "branch:0001" : (node_id);
     loader.baseParams.tree_id = 1;
 
     if (node.parentNode && node.parentNode.id == "UserGraphsTree") {
