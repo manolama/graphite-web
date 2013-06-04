@@ -75,6 +75,7 @@ def search_view(request):
 
 def find_view(request):
   "View for finding metrics matching a given pattern"
+  print request.REQUEST
   profile = getProfile(request)
   format = request.REQUEST.get('format', 'treejson')
   local_only = int( request.REQUEST.get('local', 0) )
@@ -93,26 +94,30 @@ def find_view(request):
     query = str( request.REQUEST['query'] )
   except:
     return HttpResponseBadRequest(content="Missing required parameter 'query'", mimetype="text/plain")
+  
+  log.debug("Find request with query [" + query + "]")
 
   if '.' in query:
     base_path = query.rsplit('.', 1)[0] + '.'
   else:
     base_path = ''
 
+  drilldown = False
   if format == 'completer':
-    query = query.replace('..', '*.')
-    if not query.endswith('*'):
-      query += '*'
-
-    if automatic_variants:
-      query_parts = query.split('.')
-      for i,part in enumerate(query_parts):
-        if ',' in part and '{' not in part:
-          query_parts[i] = '{%s}' % part
-      query = '.'.join(query_parts)
+    drilldown = True
+#    query = query.replace('..', '*.')
+#    if not query.endswith('*'):
+#      query += '*'
+#
+#    if automatic_variants:
+#      query_parts = query.split('.')
+#      for i,part in enumerate(query_parts):
+#        if ',' in part and '{' not in part:
+#          query_parts[i] = '{%s}' % part
+#      query = '.'.join(query_parts)
 
   try:
-    matches = list( STORE.find(query, fromTime, untilTime, local=local_only) )
+    matches = list( STORE.find(query, fromTime, untilTime, local=local_only, drilldown=drilldown) )
   except:
     log.exception()
     raise
@@ -132,9 +137,12 @@ def find_view(request):
   elif format == 'completer':
     results = []
     for node in matches:
-      node_info = dict(path=node.path, name=node.name, is_leaf=str(int(node.is_leaf)))
+      if (node.uid):
+        node_info = dict(path=node.path, name=node.name, uid=node.uid, is_leaf=str(int(node.is_leaf)))  
+      else:
+        node_info = dict(path=node.path, name=node.name, is_leaf=str(int(node.is_leaf)))
       if not node.is_leaf:
-        node_info['path'] += '.'
+        node_info['path'] += '|'
       results.append(node_info)
 
     if len(results) > 1 and wildcards:
@@ -266,8 +274,11 @@ def tree_json(nodes, base_path, wildcards=False):
     found.add(node.name)
     resultNode = {
       'text' : str(node.name),
-      'id' : base_path + str(node.name),
+      #'id' : base_path + str(node.name),
+      'id' : node.path,
     }
+    if (node.uid):
+      resultNode['uid'] = node.uid
 
     if node.is_leaf:
       resultNode.update(leafNode)
