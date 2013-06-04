@@ -43,24 +43,35 @@ class OpenTSDBFinder:
     self.port = port
     self.conn = httplib.HTTPConnection(self.host, self.port)
     
-  def find_nodes(self, query):
-    if (query.drilldown == True):
-      log.debug("Drilling down...")
-      for node in self.drilldown(query.pattern):
-        yield node
-      return
+  def find_nodes(self, query):   
+#    if (query.drilldown == True):
+#      log.debug("Drilling down...")
+#      for node in self.drilldown(query.pattern):
+#        yield node
+#      return
     log.debug("Searching OpenTSDB for branches with query [" + query.pattern + "]")
     if (query.pattern == "*" or query.pattern == "" or len(query.pattern) < 1):
       log.debug("Resetting query to 0001")
       query.pattern = "0001"
+      for node in self.fetch_branch(query):
+        yield node
+      return
     elif (query.pattern.startswith("branch:")):
       query.pattern = query.pattern.replace("branch:", "");
-    else:
+      for node in self.fetch_branch(query):
+        yield node
+      return
+    elif re.match("^[0-9a-fA-f]+$", query.pattern):
       log.debug("Fetching leaf: " + query.pattern)
       # we likely have a leaf, so return the leaf node
       yield self.get_meta(query.pattern)
       return
-      
+    else:
+      # assume a drill-down
+      for node in self.drill_recursive(query.pattern.split("."), 0, "0001"):
+        yield node
+      return
+    
     # query = branch ID
     for node in self.fetch_branch(query):
       yield node
@@ -91,19 +102,18 @@ class OpenTSDBFinder:
       return leaf
   
   def drilldown(self, path):
-    log.debug("HERE Drilling down...")
-    # if we don't need to drill down, just return the root
-    if path == None or path == "" or len(path) < 1:
-      log.debug("No pattern specified, returning root")
-      query = FindQuery("", None, None)
-      for node in self.find_nodes(query):
-        yield node
-      return
-    
+#    # if we don't need to drill down, just return the root
+#    if path == None or path == "" or len(path) < 1:
+#      log.debug("No pattern specified, returning root")
+#      query = FindQuery("", None, None)
+#      for node in self.find_nodes(query):
+#        yield node
+#      return
+#    
     current_branch = "0001"
     current_path = ""
     parts_idx = 0
-    parts = path.split("|")
+    parts = path.split(".")
     log.debug("Starting at root parts: " + str(parts) + "  Len: " + str(len(parts)))
     while current_branch:
       query = FindQuery(current_branch, None, None)
@@ -130,6 +140,127 @@ class OpenTSDBFinder:
       parts_idx += 1
     log.debug("Done with drill down")    
 
+  def drill_recursive(self, patterns, index, current_branch):
+    if (index >= len(patterns)):
+      log.debug("Reached end of pattern list, returning entire branch [" + current_branch + "]")
+      query = FindQuery(current_branch, None, None)
+      for node in self.fetch_branch(query):
+        yield node
+      return
+    
+    query = FindQuery(current_branch, None, None)
+    for node in self.fetch_branch(query):
+      # if this pattern is empty, then we return all nodes here but don't dive
+      # any further
+      if (len(patterns[index]) < 1):
+        yield node
+        continue
+      
+      # if the node matches the pattern exactly, then we drill down further
+      # since there *should* be only one match per branch
+      if (node.name == patterns[index]):
+        log.debug("Exact match of [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "]")
+        if (node.is_leaf):
+          yield node
+          continue
+        current_branch = str(node.uid)
+        for n in self.drill_recursive(patterns, index + 1, current_branch):
+          yield n
+        current_branch = str(node.uid)
+        return
+      
+      # for wildcards, we just recurse
+      if (patterns[index] == "*"):
+        log.debug("Wildcard match of [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "]")
+        current_branch = str(node.uid)
+        for n in self.drill_recursive(patterns, index + 1, current_branch):
+          yield n
+        continue
+       
+      # we need to pattern match and possibly walk the path forward to account for
+      # values with periods in them. This is where it gets messy
+      if (re.match("^" + patterns[index], node.name)):
+        log.debug("Regex match of [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "]")
+        
+        # just return a leaf
+        if (node.is_leaf):
+          yield node
+          continue
+          
+        # if we don't have a period in the value, we can continue as normal
+        if (node.name.find(".") == -1):
+          log.debug("No splits found for pattern [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "]")
+          current_branch = str(node.uid)
+          for n in self.drill_recursive(patterns, index + 1, current_branch):
+            yield n
+          current_branch = str(node.uid)
+          continue
+        
+        # we need this later
+        explode_node = node.name.split(".")
+        
+        # flatten path and see if the full node name is in the pattern to
+        # see if we need to increment and deep dive
+        path = ""
+        log.debug("Checking to see if node name is in the flattened pattern")
+        for i in range(index, len(patterns)):
+          if (len(path) > 0):
+            path += "."
+          path += patterns[i]
+        if path.startswith(node.name):
+          # figure out how far into the patterns we need to go  
+          log.debug("Found node [" + node.name + "] within flattened pattern [" + path + "]")
+          
+          # recurse
+          current_branch = str(node.uid)
+          for n in self.drill_recursive(patterns, index + len(explode_node), current_branch):
+            yield n
+          continue
+        
+        log.debug("Node wasn't in the pattern, comparing exploded to pattern")
+        # if we're here, then we have to loop through each part of the exploded
+        # node and compare each chunk to the next patterns
+        matched = True
+        wildcard = False
+        pattern_index = 0 # used to keep track of how many patterns we need to
+                          # fast forward through
+        for i in range(0, len(explode_node)):
+          if (not wildcard and i > len(patterns)):
+            matched = False
+            break
+          if (wildcard and i > len(patterns)):
+            break
+          log.debug("Working on pattern [" + patterns[index + i] + "]")
+          if (explode_node[i] == patterns[index + i]):
+            log.debug("match exact")
+            pattern_index += 1
+            continue
+          if (patterns[index + i] == "*"):
+            log.debug("match wildcard")
+            wildcard = True
+            pattern_index += 1
+            continue
+          if (re.match("^" + patterns[index + i], explode_node[i])):
+            log.debug("match regex")
+            pattern_index += 1
+            continue
+          if (wildcard):
+            log.debug("wildcard continuation")
+            continue
+          log.debug("Failed to match on index [" + str(i) + "] and pattern [" + patterns[index + i] + "]")
+          matched = False
+          break
+        
+        # good match, so recurse
+        if (matched):
+          log.debug("Matched on the next set of patterns [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "] w index [" + str(pattern_index) + "]")
+          current_branch = str(node.uid)
+          for n in self.drill_recursive(patterns, index + pattern_index, current_branch):
+            yield n
+          continue
+        
+        log.debug("Skipping node [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "]")
+
   def fetch_branch(self, query):
     self.conn.request("GET", "/api/tree/branch?branch=" + query.pattern)
     resp = self.conn.getresponse()
@@ -152,7 +283,7 @@ class OpenTSDBFinder:
       else:
         log.debug("No child branches found for [" + query.pattern + "]")
 
-      if (json_data['leaves']):
+      if (json_data['leaves'] and (json_data['leaves']) > 0):
         for i in xrange(len(json_data['leaves'])):
           #reader = GzippedWhisperReader(absolute_path, real_metric_path)
           reader = OpenTSDBReader(self.host, self.port, json_data['leaves'][i]['tsuid'])
