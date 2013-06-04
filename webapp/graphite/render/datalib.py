@@ -108,7 +108,8 @@ def fetchData(requestContext, pathExpr):
     (timeInfo, values) = results
     (start, end, step) = timeInfo
 
-    series = TimeSeries(node.path, start, end, step, values)
+    #series = TimeSeries(node.path, start, end, step, values)
+    series = TimeSeries(node.name, start, end, step, values)
     series.pathExpression = pathExpr #hack to pass expressions through to render functions
     seriesList.append(series)
 
