@@ -1,13 +1,16 @@
 import time
 from django.conf import settings
 from graphite.logger import log
-from graphite.util import is_local_interface, is_pattern
+from graphite.util import is_local_interface
 from graphite.remote_storage import RemoteStore
 from graphite.node import LeafNode
 from graphite.intervals import Interval, IntervalSet
 from graphite.readers import MultiReader
-from graphite.finders import CeresFinder, StandardFinder
-
+from graphite.finders import FindQuery, StandardFinder, OpenTSDBFinder
+try:
+  from graphite.finders import CeresFinder
+except ImportError as e:
+  log.debug("Unable to import the CeresFinder");
 
 class Store:
   def __init__(self, finders, hosts=[]):
@@ -16,8 +19,9 @@ class Store:
     self.remote_stores = [ RemoteStore(host) for host in remote_hosts ]
 
 
-  def find(self, pattern, startTime=None, endTime=None, local=False):
+  def find(self, pattern, startTime=None, endTime=None, local=False, drilldown=False):
     query = FindQuery(pattern, startTime, endTime)
+    query.setDrilldown(drilldown)
 
     # Start remote searches
     if not local:
@@ -121,34 +125,10 @@ class Store:
         yield LeafNode(path, reader)
 
 
-
-class FindQuery:
-  def __init__(self, pattern, startTime, endTime):
-    self.pattern = pattern
-    self.startTime = startTime
-    self.endTime = endTime
-    self.isExact = is_pattern(pattern)
-    self.interval = Interval(float('-inf') if startTime is None else startTime,
-                             float('inf') if endTime is None else endTime)
-
-
-  def __repr__(self):
-    if self.startTime is None:
-      startString = '*'
-    else:
-      startString = time.ctime(self.startTime)
-
-    if self.endTime is None:
-      endString = '*'
-    else:
-      endString = time.ctime(self.endTime)
-
-    return '<FindQuery: %s from %s until %s>' % (self.pattern, startString, endString)
-
-
 # Exposed Storage API
 finders = [
-  CeresFinder(settings.CERES_DIR),
+  #CeresFinder(settings.CERES_DIR),
   StandardFinder(settings.STANDARD_DIRS),
+  OpenTSDBFinder(settings.TSDB_HOST, settings.TSDB_PORT)
 ]
 STORE = Store(finders, hosts=settings.CLUSTER_SERVERS)
