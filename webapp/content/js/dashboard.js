@@ -65,6 +65,7 @@ var schemesStore = new Ext.data.Store({
 
 var ContextFieldValueRecord = Ext.data.Record.create([
   {name: 'name'},
+  {uid: 'uid'},
   {path: 'path'}
 ]);
 
@@ -306,14 +307,14 @@ function initDashboard () {
           format: 'completer',
           automatic_variants: (UI_CONFIG.automatic_variants) ? '1' : '0'
         },
-        fields: ['path', 'is_leaf'],
+        fields: ['path', 'uid', 'is_leaf'],
         root: 'metrics'
       }),
       listeners: {
         rowclick: function (thisGrid, rowIndex, e) {
                     var record = thisGrid.getStore().getAt(rowIndex);
                     if (record.data['is_leaf'] == '1') {
-                      graphAreaToggle(record.data.path);
+                      graphAreaToggle(record.data.uid);
                       thisGrid.getView().refresh();
                     } else {
                       metricSelectorTextField.setValue(record.data.path);
@@ -884,6 +885,8 @@ function metricTreeSelectorShow(pattern) {
 
     if (node.id == 'rootMetricSelectorNode') {
       loader.baseParams.query = pattern + '.*';
+    } else if (node.attributes.uid !== undefined) {
+      loader.baseParams.query = node.attributes.uid;
     } else {
       var id_parts = node.id.split('.');
       id_parts.splice(0, base_parts.length); //make it relative
@@ -1368,8 +1371,15 @@ function newFromUrl() {
 
 function newFromSavedGraph() {
   function setParams(loader, node) {
-    var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
-    loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
+    if (node.attributes.uid !== undefined) {
+      var node_id = node.attributes.name;
+	  loader.baseParams.query = "branch:" + node.attributes.uid;
+	} else {
+	  var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
+      loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
+	}
+//    var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
+//    loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
     loader.baseParams.format = 'treejson';
     loader.baseParams.contexts = '1';
     loader.baseParams.path = node_id;
