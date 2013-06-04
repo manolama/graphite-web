@@ -142,7 +142,7 @@ def find_view(request):
       else:
         node_info = dict(path=node.path, name=node.name, is_leaf=str(int(node.is_leaf)))
       if not node.is_leaf:
-        node_info['path'] += '|'
+        node_info['path'] += '.'
       results.append(node_info)
 
     if len(results) > 1 and wildcards:
