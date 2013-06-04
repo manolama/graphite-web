@@ -40,8 +40,12 @@ function createTreePanel(){
   var rootNode = new Ext.tree.TreeNode({});
 
   function setParams(loader, node) {
-    var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
-    loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
+	if (node.attributes.uid !== undefined) {
+	  loader.baseParams.query = "branch:" + node.attributes.uid;
+	} else {
+	  var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
+      loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
+	}
     loader.baseParams.format = 'treejson';
     loader.baseParams.path = node_id;
 
@@ -124,7 +128,7 @@ function createTreePanel(){
       return;
     }
 
-    Composer.toggleTarget(node.id);
+    Composer.toggleTarget(node.attributes.uid);
   });
 
   return treePanel;
