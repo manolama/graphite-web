@@ -10,7 +10,7 @@ class Node(object):
         if (int(key) == 1):
           self.path = path[key]
         elif (int(key) > 0):
-          self.path = self.path + "|" + path[key]
+          self.path = self.path + "." + path[key]
       self.name = path[keys[-1]]
     else:
       self.path = path
