@@ -23,23 +23,30 @@ logging.addLevelName(30,"metric_access")
 class GraphiteLogger:
   def __init__(self):
     #Setup log files
-    self.infoLogFile = os.path.join(settings.LOG_DIR,"info.log")
+    self.defaultLogFile = os.path.join(settings.LOG_DIR,"graphite.log")
+    #self.infoLogFile = os.path.join(settings.LOG_DIR,"info.log")
     self.exceptionLogFile = os.path.join(settings.LOG_DIR,"exception.log")
     self.cacheLogFile = os.path.join(settings.LOG_DIR,"cache.log")
     self.renderingLogFile = os.path.join(settings.LOG_DIR,"rendering.log")
     self.metricAccessLogFile = os.path.join(settings.LOG_DIR,"metricaccess.log")
     #Setup loggers
-    self.infoLogger = logging.getLogger("info")
-    self.infoLogger.setLevel(logging.INFO)
+    self.defaultLogger = logging.getLogger("default")
+    self.defaultLogger.setLevel(logging.DEBUG)
+    #self.infoLogger = logging.getLogger("info")
+    #self.infoLogger.setLevel(logging.INFO)
     self.exceptionLogger = logging.getLogger("exception")
     self.cacheLogger = logging.getLogger("cache")
     self.renderingLogger = logging.getLogger("rendering")
     self.metricAccessLogger = logging.getLogger("metric_access")
     #Setup formatter & handlers
     self.formatter = logging.Formatter("%(asctime)s :: %(message)s","%a %b %d %H:%M:%S %Y")
-    self.infoHandler = Rotater(self.infoLogFile,when="midnight",backupCount=1)
-    self.infoHandler.setFormatter(self.formatter)
-    self.infoLogger.addHandler(self.infoHandler)
+    self.defaultHandler = Rotater(self.defaultLogFile,when="midnight",backupCount=1)
+    self.defaultHandler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s","%a %b %d %H:%M:%S %Y"))
+    self.defaultLogger.addHandler(self.defaultHandler)
+    #self.infoHandler = Rotater(self.infoLogFile,when="midnight",backupCount=1)
+    #self.infoHandler.setFormatter(self.formatter)
+    #self.infoLogger.addHandler(self.infoHandler)
+    
     self.exceptionHandler = Rotater(self.exceptionLogFile,when="midnight",backupCount=1)
     self.exceptionHandler.setFormatter(self.formatter)
     self.exceptionLogger.addHandler(self.exceptionHandler)
@@ -56,8 +63,17 @@ class GraphiteLogger:
       self.metricAccessHandler.setFormatter(self.formatter)
       self.metricAccessLogger.addHandler(self.metricAccessHandler)
 
+  def debug(self,msg,*args,**kwargs):
+    return self.defaultLogger.debug(msg,*args,**kwargs)
+  
   def info(self,msg,*args,**kwargs):
-    return self.infoLogger.info(msg,*args,**kwargs)
+    return self.defaultLogger.info(msg,*args,**kwargs)
+  
+  def warn(self,msg,*args,**kwargs):
+    return self.defaultLogger.warn(msg,*args,**kwargs)
+  
+  def error(self,msg,*args,**kwargs):
+    return self.defaultLogger.error(msg,*args,**kwargs)
 
   def exception(self,msg="Exception Caught",**kwargs):
     return self.exceptionLogger.exception(msg,**kwargs)
