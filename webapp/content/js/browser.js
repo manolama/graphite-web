@@ -42,6 +42,7 @@ function createTreePanel(){
   function setParams(loader, node) {
 	if (node.attributes.uid !== undefined) {
 	  loader.baseParams.query = "branch:" + node.attributes.uid;
+	  loader.baseParams.path = node.id;
 	} else {
 	  var node_id = node.id.replace(/^[A-Za-z]+Tree\.?/,"");
       loader.baseParams.query = (node_id == "") ? "*" : (node_id + ".*");
@@ -124,11 +125,11 @@ function createTreePanel(){
 
     if (node.attributes.graphUrl) {
       var url = node.attributes.graphUrl
-      Composer.loadMyGraph(node.attributes.text, url);
+      Composer.loadMyGraph(node.id, url);
       return;
     }
 
-    Composer.toggleTarget(node.attributes.uid);
+    Composer.toggleTarget(node.id);
   });
 
   return treePanel;
