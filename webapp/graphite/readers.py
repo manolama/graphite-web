@@ -1,5 +1,6 @@
 import os
 import time
+import httplib, json
 from graphite.node import LeafNode, BranchNode
 from graphite.intervals import Interval, IntervalSet
 from graphite.carbonlink import CarbonLink
@@ -103,6 +104,72 @@ class MultiReader(object):
 
     return (time_info, values)
 
+
+class OpenTSDBReader(object):
+  __slots__ = ('host', 'port', 'tsuid')
+  supported = True
+  
+  def __init__(self, host, port, tsuid):
+    self.host = host
+    self.port = port
+    self.tsuid = tsuid
+    
+  def get_intervals(self):
+    start = 0
+    end = time.time()
+    return IntervalSet( [Interval(start, end)] )
+
+  def fetch(self, startTime, endTime):    
+    tsd_url = "/api/query?start=" + str(int(startTime)) + "&end=" + str(int(endTime)) + "&tsuid=sum:1m-avg:" + self.tsuid
+    log.debug("Fetching OpenTSDB Data [" + tsd_url + "]")
+    
+    conn = httplib.HTTPConnection(self.host, self.port)
+    conn.request("GET", tsd_url)
+    resp = conn.getresponse()
+    
+    if resp.status != 200:
+      log.warn("Failed to retrieve data for TSUID [" + self.tsuid + "]. Status: " + str(resp.status))
+    else:
+      log.debug("Positive response from OpenTSDB for the TSUID [" + self.tsuid + "]")
+      json_data = json.loads(resp.read())
+      
+      # WWRRDD: setup a fixed list since that's what the RRD type files would do
+      expected_dps = int((endTime - startTime) / 60)
+      valueList = list(None for i in range(expected_dps))
+      
+      if (json_data and len(json_data) and 'dps' in json_data[0]):
+        counter = 0
+        keys = sorted(json_data[0]['dps'].iterkeys())
+        first_ts = int(keys[0])
+        
+        if (first_ts >= int(startTime)):
+          cur_ts = int(startTime)
+          while (cur_ts < first_ts):
+            counter += 1
+            cur_ts += 60
+            if (counter > expected_dps):
+              break
+        log.debug("Starting counter at [" + str(counter) + "]")
+        
+        for key in keys:
+          if (int(key) < int(startTime)):
+            log.debug("Key was less than start time [" + str(key) + "]")
+            continue
+          elif (int(key) > int(endTime)):
+            log.debug("Key [" + str(key) + "] was greater than end time [" + str(int(endTime)) + "]")
+            break
+          
+          valueList[counter] = json_data[0]['dps'][key]
+          counter += 1
+        log.debug("Retrieved [" + str(counter) + "] datapoints")
+        
+        timeInfo = (startTime, endTime, 60)
+      else:
+        log.info("No data found")
+        return None
+      
+      return (timeInfo, valueList)
+    
 
 class CeresReader(object):
   __slots__ = ('ceres_node', 'real_metric_path')
