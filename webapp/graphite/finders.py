@@ -41,7 +41,6 @@ class OpenTSDBFinder:
   def __init__(self, host, port):
     self.host = host
     self.port = port
-    self.conn = httplib.HTTPConnection(self.host, self.port)
     
   def find_nodes(self, query):   
 #    if (query.drilldown == True):
@@ -262,14 +261,21 @@ class OpenTSDBFinder:
         log.debug("Skipping node [" + patterns[index] + "] on node [" + node.name + "] in branch [" + str(current_branch) + "]")
 
   def fetch_branch(self, query):
-    self.conn.request("GET", "/api/tree/branch?branch=" + query.pattern)
-    resp = self.conn.getresponse()
+    conn = httplib.HTTPConnection(self.host, self.port)
+    conn.request("GET", "/api/tree/branch?branch=" + query.pattern)
+    resp = conn.getresponse()
+    #Make sure you grab the data immediately. resp.read() second time gives an empty string
+    data = resp.read()
     log.debug("API request has returned")
     if resp.status != 200:
       log.warn("Could not find a branch for [" + query.pattern + "]. Status: " + str(resp.status))
     else:
-      log.debug("Positive response from OpenTSDB for the branch at [" + query.pattern + "]")
-      json_data = json.loads(resp.read())
+      #Warn if data is empty. json.loads will throw the error for you
+      if not data:
+        log.warn("The JSON returned for the query [" + query.pattern +"] is empty");
+      else:
+        log.debug("Positive response from OpenTSDB for the branch at [" + query.pattern + "]")
+      json_data = json.loads(data)
 
       if (json_data['branches'] and (json_data['branches']) > 0):
         for i in xrange(len(json_data['branches'])):

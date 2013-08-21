@@ -159,7 +159,7 @@ class OpenTSDBReader(object):
             log.debug("Key [" + str(key) + "] was greater than end time [" + str(int(endTime)) + "]")
             break
           
-          valueList[counter] = json_data[0]['dps'][key]
+          valueList[counter-1] = json_data[0]['dps'][key]
           counter += 1
         log.debug("Retrieved [" + str(counter) + "] datapoints")
         
